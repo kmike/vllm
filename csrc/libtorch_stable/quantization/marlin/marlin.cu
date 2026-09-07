@@ -32,6 +32,7 @@
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/util/Exception.h>
 
+#include <cstdlib>  // getenv/atoi for the tuning lever below
 #include "libtorch_stable/torch_utils.h"
 
 #define STATIC_ASSERT_SCALAR_TYPE_VALID(scalar_t)               \
@@ -434,6 +435,19 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
     int thread_k = thread_k_init;
     int thread_n = thread_n_init;
 
+    // CMP170HX tuning lever (pure ADD, default-off): force the thread
+    // geometry Marlin would otherwise auto-pick, to benchmark alternate
+    // table rows per shape. All-or-nothing: partial sets are ignored.
+    // Unset = stock auto behavior, bit-identical.
+    {
+      const char* env_tk = std::getenv("VLLM_MARLIN_THREAD_K");
+      const char* env_tn = std::getenv("VLLM_MARLIN_THREAD_N");
+      if (env_tk && env_tn) {
+        thread_k = std::atoi(env_tk);
+        thread_n = std::atoi(env_tn);
+      }
+    }
+
     int thread_m_blocks = min(div_ceil(prob_m_split, 16), max_thread_m_blocks);
     int m_block_size_8 = prob_m_split <= 8 && a_type.size_bits() == 16;
 
@@ -441,7 +455,11 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
     exec_config_t exec_cfg;
     thread_config_t thread_tfg;
     if (thread_k != -1 && thread_n != -1) {
-      thread_tfg = thread_config_t{thread_k, thread_n, default_threads};
+      int force_threads = default_threads;
+      if (const char* env_tt = std::getenv("VLLM_MARLIN_THREAD_T")) {
+        force_threads = std::atoi(env_tt);
+      }
+      thread_tfg = thread_config_t{thread_k, thread_n, force_threads};
       exec_cfg = exec_config_t{1, thread_tfg};
       STD_TORCH_CHECK(prob_n % thread_n == 0, "prob_n = ", prob_n,
                       " is not divisible by thread_n = ", thread_n);
