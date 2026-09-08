@@ -318,7 +318,12 @@ exec_config_t determine_exec_config(
 
     if (kernel == MarlinDefault) continue;
 
-    return {1, th_config};
+    int bps = 1;
+    // Tuning lever (default-off): grid = sms * bps (occupancy/granularity).
+    if (const char* env_bps = std::getenv("VLLM_MARLIN_BLOCKS_PER_SM")) {
+      bps = std::atoi(env_bps);
+    }
+    return {bps, th_config};
   }
 
   return exec_cfg;
@@ -423,6 +428,10 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
 
   int max_par = 16;
   if (prob_n <= 4096) max_par = 16 * 8;
+  // Tuning lever (default-off): cap M-split parallelism (fewer/bigger launches).
+  if (const char* env_mp = std::getenv("VLLM_MARLIN_MAX_PAR")) {
+    max_par = std::atoi(env_mp);
+  }
   int max_shared_mem_new = max_shared_mem;
   int rest_m = prob_m;
   int max_thread_m_blocks = 4;
@@ -460,7 +469,11 @@ void marlin_mm(const void* A, const void* B, void* C, void* C_tmp, void* b_bias,
         force_threads = std::atoi(env_tt);
       }
       thread_tfg = thread_config_t{thread_k, thread_n, force_threads};
-      exec_cfg = exec_config_t{1, thread_tfg};
+      int bps_force = 1;
+      if (const char* env_bps = std::getenv("VLLM_MARLIN_BLOCKS_PER_SM")) {
+        bps_force = std::atoi(env_bps);
+      }
+      exec_cfg = exec_config_t{bps_force, thread_tfg};
       STD_TORCH_CHECK(prob_n % thread_n == 0, "prob_n = ", prob_n,
                       " is not divisible by thread_n = ", thread_n);
       STD_TORCH_CHECK(prob_k % thread_k == 0, "prob_k = ", prob_k,
