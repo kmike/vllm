@@ -90,9 +90,27 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
         # missing from hf_quant_config.json exclude_modules. Force unquantized.
         # Ref: https://github.com/vllm-project/vllm/pull/38650
         # Ref: https://github.com/NVIDIA/Model-Optimizer/pull/1124
+        # GPTQ/compressed-tensors: checkpoints may exclude MTP from
+        # quantization via quantization_config.dynamic "-:pattern" entries
+        # (e.g. BF16 draft head alongside a quantized target). When detected,
+        # disable quantization for the whole predictor (fc + layers).
+        # NOTE (cmp, Sep-9): upstream bypassed layers but not fc; a plain
+        # BF16 fc under a pack-quantized config hits the loader error, so
+        # fc is included here.
+        original_quant = vllm_config.quant_config
+        mtp_unquantized = False
+        if quant_config and quant_config.get_name() not in ("modelopt_fp4",):
+            hf_qc = getattr(model_config.hf_config, "quantization_config",
+                            None)
+            if isinstance(hf_qc, dict):
+                dynamic = hf_qc.get("dynamic", {})
+                if any(k.startswith("-:") and "mtp" in k for k in dynamic):
+                    vllm_config.quant_config = None
+                    mtp_unquantized = True
         fc_quant = (
             None
             if (quant_config and quant_config.get_name() == "modelopt_fp4")
+            or mtp_unquantized
             else quant_config
         )
         self.fc = ColumnParallelLinear(
@@ -105,16 +123,6 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
             prefix=f"{prefix}.fc",
         )
 
-        # GPTQ: quantized checkpoints may exclude MTP from quantization via
-        # quantization_config.dynamic with "-:pattern" entries. When detected,
-        # disable quantization for MTP layers so they use unquantized params.
-        original_quant = vllm_config.quant_config
-        if quant_config and quant_config.get_name() not in ("modelopt_fp4",):
-            hf_qc = getattr(model_config.hf_config, "quantization_config", None)
-            if isinstance(hf_qc, dict):
-                dynamic = hf_qc.get("dynamic", {})
-                if any(k.startswith("-:") and "mtp" in k for k in dynamic):
-                    vllm_config.quant_config = None
         self.layers = torch.nn.ModuleList(
             Qwen3_5DecoderLayer(
                 vllm_config,
