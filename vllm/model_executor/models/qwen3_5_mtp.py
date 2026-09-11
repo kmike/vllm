@@ -107,6 +107,7 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
                 quant_config=None,
                 prefix=maybe_prefix(prefix, "draft_lm_head"),
             )
+            logger.info("MTP drafter uses a %d-token draft head", int(_ids.numel()))
 
         # Workaround: mtp.fc is stored as BF16 in NVFP4 checkpoints but is
         # missing from hf_quant_config.json exclude_modules. Force unquantized.
