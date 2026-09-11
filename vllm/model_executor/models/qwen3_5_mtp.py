@@ -86,6 +86,28 @@ class Qwen3_5MultiTokenPredictor(nn.Module):
             config.hidden_size,
         )
 
+        # cmp port (syv-ai): vocab-truncated draft head. If the checkpoint
+        # ships mtp_draft_vocab_ids.pt, the drafter scores only those rows
+        # (mtp.draft_lm_head.*, sliced from the bf16 lm_head) instead of the
+        # full 248k-row head; all other logits are -inf. Speculative decoding
+        # stays exact (verify uses the target); only acceptance can change.
+        # MTP_DRAFT_VOCAB=0 disables.
+        import os as _os
+
+        self.draft_lm_head = None
+        self.draft_vocab_ids = None
+        _ids_path = _os.path.join(model_config.model, "mtp_draft_vocab_ids.pt")
+        if _os.path.exists(_ids_path) and _os.environ.get("MTP_DRAFT_VOCAB", "1") != "0":
+            _ids = torch.load(_ids_path, map_location="cpu")
+            self.draft_vocab_ids = _ids
+            # always unquantized: we slice plain bf16 rows from the bf16 lm_head
+            self.draft_lm_head = ParallelLMHead(
+                int(_ids.numel()),
+                config.hidden_size,
+                quant_config=None,
+                prefix=maybe_prefix(prefix, "draft_lm_head"),
+            )
+
         # Workaround: mtp.fc is stored as BF16 in NVFP4 checkpoints but is
         # missing from hf_quant_config.json exclude_modules. Force unquantized.
         # Ref: https://github.com/vllm-project/vllm/pull/38650
@@ -262,6 +284,13 @@ class Qwen3_5MTP(LocalArgmaxMixin, nn.Module, SupportsMultiModal):
 
         self.logits_processor = LogitsProcessor(config.vocab_size)
 
+        # cmp port (syv-ai): vocab-truncated draft head
+        self.draft_logits_processor = (
+            LogitsProcessor(int(self.model.draft_vocab_ids.numel()))
+            if getattr(self.model, "draft_lm_head", None) is not None
+            else None
+        )
+
     def embed_input_ids(
         self,
         input_ids: torch.Tensor,
@@ -307,11 +336,26 @@ class Qwen3_5MTP(LocalArgmaxMixin, nn.Module, SupportsMultiModal):
         hidden_states: torch.Tensor,
         spec_step_idx: int = 0,
     ) -> torch.Tensor | None:
+        # cmp port (syv-ai): vocab-truncated draft head
+        if self.draft_logits_processor is not None:
+            sub = self.draft_logits_processor(self.model.draft_lm_head, hidden_states)
+            if sub is None:
+                return None
+            ids = self.model.draft_vocab_ids
+            if ids.device != sub.device:
+                ids = ids.to(sub.device)
+                self.model.draft_vocab_ids = ids
+            full = sub.new_full((sub.shape[0], self.config.vocab_size), float("-inf"))
+            full.index_copy_(1, ids, sub)
+            return full
         return self.logits_processor(self.lm_head, hidden_states)
 
     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
         def remap_weight_names(weights):
             for name, weight in weights:
+                # cmp port (syv-ai): skip the truncated draft head when disabled
+                if "draft_lm_head" in name and self.model.draft_lm_head is None:
+                    continue
                 if name.startswith("mtp."):
                     name = name.replace("mtp.", "model.")
                 elif any(key in name for key in ["embed_tokens", "lm_head"]):
