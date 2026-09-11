@@ -785,6 +785,15 @@ class GPUModelRunner(
                 reasoning_config=self.vllm_config.reasoning_config,
                 use_replayssm=self.cache_config.use_replayssm,
             )
+        if getattr(self, "speculator", None) is not None and hasattr(
+            self.speculator, "set_top_p_top_k"
+        ):
+            # syv port: hand the DFlash2 selector the live request top_p/
+            # top_k buffers for draft-support truncation.
+            self.speculator.set_top_p_top_k(
+                None if self.input_batch.no_top_p else self.input_batch.top_p,
+                None if self.input_batch.no_top_k else self.input_batch.top_k,
+            )
 
         # Separate cuda stream for overlapping transfer of sampled token ids from
         # GPU to CPU when async scheduling is enabled.
@@ -7396,6 +7405,15 @@ class GPUModelRunner(
                     reasoning_config=self.vllm_config.reasoning_config,
                     use_replayssm=self.cache_config.use_replayssm,
                     slot_mapping_modes=slot_mapping_modes,
+                )
+            if getattr(self, "speculator", None) is not None and hasattr(
+                self.speculator, "set_top_p_top_k"
+            ):
+                # syv port: hand the DFlash2 selector the live request top_p/
+                # top_k buffers for draft-support truncation.
+                self.speculator.set_top_p_top_k(
+                    None if self.input_batch.no_top_p else self.input_batch.top_p,
+                    None if self.input_batch.no_top_k else self.input_batch.top_k,
                 )
 
         assert self._init_block_sizes == block_sizes, (

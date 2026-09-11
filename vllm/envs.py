@@ -188,6 +188,12 @@ if TYPE_CHECKING:
     VLLM_HUMMING_ONLINE_QUANT_CONFIG: dict[str, Any] | None = None
     VLLM_HUMMING_INPUT_QUANT_CONFIG: dict[str, Any] | None = None
     VLLM_HUMMING_USE_F16_ACCUM: bool = False
+    # syv patch: single-user speed knobs (registered so they take part in the
+    # torch.compile cache key; VLLM_MARLIN_TUNE changes the Marlin workspace shape)
+    VLLM_MARLIN_TUNE: bool = False
+    VLLM_MARLIN_TUNE_DIR: str = ""
+    VLLM_SPEC_DECODE_ATTN: bool = False
+    VLLM_DRAFT_TOPK_TOPP: bool = True
     VLLM_HUMMING_MOE_GEMM_TYPE: Literal["indexed", "grouped", "auto"] | None = None
     VLLM_B12X_MOE_FP4_FORCE_A16: bool = False
     VLLM_DEEPEPLL_NVFP4_DISPATCH: bool = False
