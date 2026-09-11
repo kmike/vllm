@@ -272,6 +272,13 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if self.speculative_config is not None:
             if self.is_last_pp_rank:
                 self.speculator = init_speculator(self.vllm_config, self.device)
+                if hasattr(self.speculator, "set_top_p_top_k"):
+                    # syv port: hand the DFlash2 selector the live request
+                    # top_p/top_k buffers for draft-support truncation.
+                    self.speculator.set_top_p_top_k(
+                        None if self.input_batch.no_top_p else self.input_batch.top_p,
+                        None if self.input_batch.no_top_k else self.input_batch.top_k,
+                    )
 
             if self.speculative_config.method in (
                 "eagle3",

@@ -22,11 +22,14 @@ def _selector_walk_kernel(
     seeds_ptr,
     tokens_ptr,
     realized_scores_ptr,
+    req_top_p_ptr,
+    req_top_k_ptr,
     num_steps: tl.constexpr,
     top_k: tl.constexpr,
     BLOCK_K: tl.constexpr,
     SAMPLE_PROBABILISTIC: tl.constexpr,
     USE_FP64: tl.constexpr,
+    TRUNCATE: tl.constexpr,
 ):
     row = tl.program_id(0)
     offsets = tl.arange(0, BLOCK_K)
@@ -35,6 +38,10 @@ def _selector_walk_kernel(
     valid = req_state >= 0
     temperature = tl.load(temperature_ptr + req_state, mask=valid, other=0.0)
     seed = tl.load(seeds_ptr + req_state, mask=valid, other=0)
+    if TRUNCATE:
+        req_top_p = tl.load(req_top_p_ptr + req_state, mask=valid, other=1.0)
+        req_top_k = tl.load(req_top_k_ptr + req_state, mask=valid, other=0)
+        req_top_k = tl.where(req_top_k > 0, req_top_k, BLOCK_K)
     previous = 0
     for step in range(num_steps):
         flat = row * num_steps + step
@@ -54,8 +61,28 @@ def _selector_walk_kernel(
         # sample_pos is the predicted token's position P. Sampling keys a draw
         # by the position before the sampled token, P-1.
         sample_pos = tl.load(sample_pos_ptr + flat) - 1
+        # syv port: truncate the proposal support to the request's
+        # top-k/top-p (the verify truncates the target the same way; draft
+        # mass outside that support is a guaranteed rejection). Rank-based
+        # over the 16 candidates; keep-set is scale-independent, so we mask
+        # the RAW scores and cache them (the rejection sampler applies the
+        # temperature on load => truncated q; lossless).
+        step_scores = scores
+        if TRUNCATE:
+            if SAMPLE_PROBABILISTIC:
+                if temperature > 0.0:
+                    t_scores = scores / temperature
+                    mx = tl.max(t_scores, axis=0)
+                    pr = tl.exp(t_scores - mx)
+                    pr = pr / tl.sum(pr, axis=0)
+                    gt = t_scores[None, :] > t_scores[:, None]
+                    rank = tl.sum(gt.to(tl.int32), axis=1)
+                    mass_before = tl.sum(tl.where(gt, pr[None, :], 0.0), axis=1)
+                    keep = (mask & valid) & (rank < req_top_k) & (mass_before < req_top_p)
+                    step_scores = tl.where(keep, scores, float("-inf"))
+
         _, index = gumbel_noised_argmax(
-            scores,
+            step_scores,
             candidates,
             mask & valid,
             seed,
@@ -67,7 +94,7 @@ def _selector_walk_kernel(
 
         tl.store(
             realized_scores_ptr + candidate_base + offsets,
-            scores,
+            step_scores,
             mask=mask & valid,
         )
         token = tl.load(candidate_ptr + candidate_base + index, mask=valid, other=0)
@@ -129,6 +156,16 @@ class DFlash2Speculator(DFlashSpeculator):
         self._cached_candidate_ids = torch.zeros(
             self._selector_scores.shape, dtype=torch.int64, device=device
         )
+        # syv port: request top_p/top_k buffers handed over by the model
+        # runner; VLLM_DFLASH2_DRAFT_TOPK_TOPP=0 disables the truncation.
+        self._req_top_p: torch.Tensor | None = None
+        self._req_top_k: torch.Tensor | None = None
+        import os as _os
+        self._truncate = _os.environ.get("VLLM_DFLASH2_DRAFT_TOPK_TOPP", "1") == "1"
+
+    def set_top_p_top_k(self, top_p, top_k) -> None:
+        self._req_top_p = top_p
+        self._req_top_k = top_k
 
     def draft_logits_spec(self, vllm_config: VllmConfig) -> tuple[torch.dtype, float]:
         # fp32 so the walk and the rejection that checks it read the same
@@ -143,6 +180,7 @@ class DFlash2Speculator(DFlashSpeculator):
         num_reqs: int,
     ) -> None:
         block_k = triton.next_power_of_2(self.selector_top_k)
+        truncate = self._truncate and self._req_top_p is not None
         _selector_walk_kernel[(num_reqs,)](
             scores.contiguous(),
             candidate_ids.contiguous(),
@@ -152,11 +190,14 @@ class DFlash2Speculator(DFlashSpeculator):
             self.seeds,
             self.draft_tokens,
             self._selector_scores,
+            self._req_top_p if truncate else self.temperature,
+            self._req_top_k if truncate else self.sample_idx_mapping,
             num_steps=self.num_speculative_steps,
             top_k=self.selector_top_k,
             BLOCK_K=block_k,
             SAMPLE_PROBABILISTIC=self.draft_logits is not None,
             USE_FP64=self.use_fp64_gumbel,
+            TRUNCATE=truncate,
             num_warps=1,
         )
 
