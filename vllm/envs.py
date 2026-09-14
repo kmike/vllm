@@ -759,6 +759,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Feature flag to enable/disable Inductor standalone compile.
     # In torch <= 2.7 we ignore this flag; in torch >= 2.9 this is
     # enabled by default.
+    # syv patch: single-user speed knobs (registered so they take part in the
+    # torch.compile cache key; VLLM_MARLIN_TUNE changes the Marlin workspace shape)
+    "VLLM_MARLIN_TUNE": lambda: os.environ.get("VLLM_MARLIN_TUNE", "0") == "1",
+    "VLLM_MARLIN_TUNE_DIR": lambda: os.getenv("VLLM_MARLIN_TUNE_DIR", ""),
+    "VLLM_SPEC_DECODE_ATTN": lambda: os.environ.get("VLLM_SPEC_DECODE_ATTN", "0") == "1",
+    "VLLM_DRAFT_TOPK_TOPP": lambda: os.environ.get("VLLM_DRAFT_TOPK_TOPP", "1") == "1",
     "VLLM_USE_STANDALONE_COMPILE": lambda: (
         os.environ.get("VLLM_USE_STANDALONE_COMPILE", "1") == "1"
     ),
