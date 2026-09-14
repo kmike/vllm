@@ -764,6 +764,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_MARLIN_TUNE": lambda: os.environ.get("VLLM_MARLIN_TUNE", "0") == "1",
     "VLLM_MARLIN_TUNE_DIR": lambda: os.getenv("VLLM_MARLIN_TUNE_DIR", ""),
     "VLLM_SPEC_DECODE_ATTN": lambda: os.environ.get("VLLM_SPEC_DECODE_ATTN", "0") == "1",
+    "VLLM_XQA_SM80": lambda: os.environ.get("VLLM_XQA_SM80", "0") == "1",
     "VLLM_DRAFT_TOPK_TOPP": lambda: os.environ.get("VLLM_DRAFT_TOPK_TOPP", "1") == "1",
     "VLLM_USE_STANDALONE_COMPILE": lambda: (
         os.environ.get("VLLM_USE_STANDALONE_COMPILE", "1") == "1"

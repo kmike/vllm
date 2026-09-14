@@ -541,6 +541,12 @@ def supports_trtllm_attention(is_prefill: bool = False) -> bool:
     if envs.VLLM_BATCH_INVARIANT:
         return False
 
+    # CMP 170HX (SM80): XQA decode JIT-compiles from source (no cubins);
+    # kernel has Ampere branches, numerics validated vs torch reference.
+    # Opt-in, decode-only.
+    if envs.VLLM_XQA_SM80 and current_platform.is_device_capability(80):
+        return not is_prefill
+
     # Requires NVIDIA artifactory to be accessible to download cubins
     if not has_nvidia_artifactory():
         return False

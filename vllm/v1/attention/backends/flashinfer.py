@@ -845,7 +845,13 @@ class FlashInferMetadataBuilder(AttentionMetadataBuilder[FlashInferMetadata]):
             self.use_trtllm_decode_attention = False
             self.flashinfer_trtllm_api_decode_kernel = None
         self.use_dedicated_xqa = (
-            current_platform.is_device_capability_family(120)
+            (
+                current_platform.is_device_capability_family(120)
+                or (
+                    envs.VLLM_XQA_SM80
+                    and current_platform.is_device_capability(80)
+                )
+            )
             and self.flashinfer_trtllm_api_decode_kernel == FlashInferDecodeKernel.XQA
         )
         # Adaptive verification trims drafts on device, so decode query lengths
@@ -1048,6 +1054,8 @@ class FlashInferMetadataBuilder(AttentionMetadataBuilder[FlashInferMetadata]):
 
     @staticmethod
     def _get_flashinfer_trtllm_api_decode_kernel() -> FlashInferDecodeKernel:
+        if envs.VLLM_XQA_SM80 and current_platform.is_device_capability(80):
+            return FlashInferDecodeKernel.XQA
         if current_platform.is_device_capability(
             90
         ) or current_platform.is_device_capability_family(120):
