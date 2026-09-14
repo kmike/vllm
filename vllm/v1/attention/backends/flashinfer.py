@@ -2117,8 +2117,9 @@ class FlashInferImpl(AttentionImpl):
             kv_cache_tuple = kv_cache_permute.split(hs, dim=-1)
 
         use_dcp = self.dcp_world_size > 1
-        decode_with_dedicated_xqa = (
-            decode_with_xqa and current_platform.is_device_capability_family(120)
+        decode_with_dedicated_xqa = decode_with_xqa and (
+            current_platform.is_device_capability_family(120)
+            or (envs.VLLM_XQA_SM80 and current_platform.is_device_capability(80))
         )
         if decode_with_dedicated_xqa:
             assert not use_dcp
