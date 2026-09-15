@@ -191,6 +191,9 @@ if TYPE_CHECKING:
     # cmp patch: XQA-on-SM80 opt-in (registered so it takes part in the
     # torch.compile cache key)
     VLLM_XQA_SM80: bool = False
+    # cmp patch: FA split-KV spec-decode verify attention (control lane)
+    VLLM_SPEC_DECODE_ATTN: bool = False
+    VLLM_SPEC_DECODE_ATTN_QMAX: int = 0
     VLLM_HUMMING_MOE_GEMM_TYPE: Literal["indexed", "grouped", "auto"] | None = None
     VLLM_B12X_MOE_FP4_FORCE_A16: bool = False
     VLLM_DEEPEPLL_NVFP4_DISPATCH: bool = False
@@ -749,6 +752,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # cmp patch: XQA-on-SM80 opt-in (registered so it takes part in the
     # torch.compile cache key)
     "VLLM_XQA_SM80": lambda: os.environ.get("VLLM_XQA_SM80", "0") == "1",
+    # cmp patch: FA split-KV spec-decode verify attention (control lane)
+    "VLLM_SPEC_DECODE_ATTN": lambda: os.environ.get("VLLM_SPEC_DECODE_ATTN", "0") == "1",
+    "VLLM_SPEC_DECODE_ATTN_QMAX": lambda: int(os.environ.get("VLLM_SPEC_DECODE_ATTN_QMAX", "0")),
     "VLLM_USE_STANDALONE_COMPILE": lambda: (
         os.environ.get("VLLM_USE_STANDALONE_COMPILE", "1") == "1"
     ),
