@@ -365,11 +365,55 @@ def compiled_random_sample(logits: torch.Tensor) -> torch.Tensor:
     return probs.div(q).argmax(dim=-1).view(-1)
 
 
+
+
+SMALL_K_MAX = 64
+
+
+def apply_top_k_top_p_small_k(
+    logits: torch.Tensor, k: torch.Tensor, p: torch.Tensor | None, k_max: int
+) -> torch.Tensor:
+    """syv patch: sort-free top-k/top-p when every request's top_k <= k_max <= 64.
+
+    Same result as apply_top_k_top_p_pytorch (top-k by value threshold, then
+    top-p among the survivors, always keeping the largest), but via a single
+    torch.topk over the vocab instead of a full sort + cumsum. Everything
+    outside the top-k_max candidates is masked by top-k anyway, so working on
+    the candidate set is exact. ~10x cheaper for a 248k vocab.
+    """
+    kk = SMALL_K_MAX if k_max > 32 else (32 if k_max > 16 else 16)
+    vals, idx = torch.topk(logits, kk, dim=-1)  # descending [B, kk]
+    kth = vals.gather(1, (k.to(torch.long).clamp(1, kk) - 1).unsqueeze(1))
+    keep = vals >= kth
+    if p is not None:
+        # softmax over the survivors of top-k (masked entries have prob 0)
+        v = torch.where(keep, vals, float("-inf"))
+        pr = torch.softmax(v, dim=-1)
+        # ascending cumulative mass: sum over candidates ranked at or below j
+        asc = pr.flip(-1).cumsum(-1).flip(-1)
+        keep_p = asc > (1 - p).unsqueeze(1)
+        keep_p[:, 0] = True
+        keep = keep & keep_p
+    logits.fill_(float("-inf"))
+    logits.scatter_(1, idx, torch.where(keep, vals, float("-inf")))
+    return logits
+
 def apply_top_k_top_p(
-    logits: torch.Tensor, k: torch.Tensor | None, p: torch.Tensor | None
+    logits: torch.Tensor,
+    k: torch.Tensor | None,
+    p: torch.Tensor | None,
+    k_max: int | None = None,
 ) -> torch.Tensor:
     if p is None and k is None:
         return logits
+
+    if (
+        k is not None
+        and k_max is not None
+        and k_max <= SMALL_K_MAX
+        and not current_platform.is_cpu()
+    ):
+        return apply_top_k_top_p_small_k(logits, k, p, k_max)
 
     if HAS_TRITON:
         return apply_top_k_top_p_triton(logits, k, p)

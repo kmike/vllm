@@ -188,6 +188,9 @@ if TYPE_CHECKING:
     VLLM_HUMMING_ONLINE_QUANT_CONFIG: dict[str, Any] | None = None
     VLLM_HUMMING_INPUT_QUANT_CONFIG: dict[str, Any] | None = None
     VLLM_HUMMING_USE_F16_ACCUM: bool = False
+    # cmp patch: XQA-on-SM80 opt-in (registered so it takes part in the
+    # torch.compile cache key)
+    VLLM_XQA_SM80: bool = False
     VLLM_HUMMING_MOE_GEMM_TYPE: Literal["indexed", "grouped", "auto"] | None = None
     VLLM_B12X_MOE_FP4_FORCE_A16: bool = False
     VLLM_DEEPEPLL_NVFP4_DISPATCH: bool = False
@@ -743,6 +746,9 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Feature flag to enable/disable Inductor standalone compile.
     # In torch <= 2.7 we ignore this flag; in torch >= 2.9 this is
     # enabled by default.
+    # cmp patch: XQA-on-SM80 opt-in (registered so it takes part in the
+    # torch.compile cache key)
+    "VLLM_XQA_SM80": lambda: os.environ.get("VLLM_XQA_SM80", "0") == "1",
     "VLLM_USE_STANDALONE_COMPILE": lambda: (
         os.environ.get("VLLM_USE_STANDALONE_COMPILE", "1") == "1"
     ),
