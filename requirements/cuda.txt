@@ -13,9 +13,19 @@ PyNvVideoCodec==2.0.4
 # FlashInfer should be updated together with the Dockerfile
 # flashinfer-cubin is not on PyPI since 0.6.14; setup.py excludes it from
 # install_requires so the published wheel does not carry an unresolvable pin
+# cmp fork: flashinfer = PR #5224 ("Enable XQA for sm80 family",
+# branch xqa-sm80-code-only = upstream main v0.7.0 + SM8x gates),
+# served as a REGULAR install from the rig's local clone:
+#   git -C ~/repos/flashinfer checkout xqa-sm80-code-only
+#   uv pip install --python <venv> ~/repos/flashinfer --no-deps
+# Pin ==0.7.0 = what we run; 0.7.0 is main-only (not on PyPI), so
+# officials can never silently replace the fork — resolution fails
+# loudly if the local install is missing (install clone FIRST, then
+# any vllm install/deps op). Every flashinfer change needs the
+# explicit install (git checkout alone serves nothing).
+# flashinfer-cubin dropped: SM80 XQA JITs from source; unused here.
 --extra-index-url https://flashinfer.ai/whl/
-flashinfer-python==0.6.18.post1
-flashinfer-cubin==0.6.18.post1
+flashinfer-python==0.7.0
 apache-tvm-ffi==0.1.11
 tilelang==0.1.12
 nvidia-cudnn-frontend>=1.19.1
